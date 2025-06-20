@@ -10,11 +10,11 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 
-@register("textadventure", "YourName", "一个将故事文字渲染为图片的动态冒险小游戏", "1.4.1")
+@register("textadventure", "YourName", "一个纯文字的动态冒险小游戏", "1.5.0")
 class TextAdventurePlugin(Star):
     """
-    一个由LLM驱动的图文动态文字冒险游戏插件。
-    此版本将AI生成的故事文字直接渲染为图片进行展示，并包含健壮的会话管理。
+    一个由LLM驱动的纯文字动态文字冒险游戏插件。
+    此版本回归纯文本，以获得最快的响应速度，并包含健壮的会话管理。
     核心参数（如超时时间、系统提示词）均可通过配置文件修改。
     """
 
@@ -32,7 +32,7 @@ class TextAdventurePlugin(Star):
             "1. 对场景的生动描述。\n"
             "2. 玩家的当前状况。\n"
             "3. 引导玩家思考下一步行动，可以给出几个选项（例如：A. ... B. ...），或直接鼓励玩家自由探索。\n"
-            "请确保故事风格一致，并避免重复。保持回复在200-300字左右，以便渲染为图片。"
+            "请确保故事风格一致，并避免重复。保持回复在200-300字左右。"
         )
         
         # 增加日志记录，方便调试，确认配置是否加载成功
@@ -61,9 +61,9 @@ class TextAdventurePlugin(Star):
 
         # 发送免责声明和游玩方式
         disclaimer_and_instructions = (
-            "📜 **动态图文冒险 - 游戏须知** 📜\n\n"
+            "📜 **动态文字冒险 - 游戏须知** 📜\n\n"
             "**免责声明**：\n"
-            "本游戏由AI驱动，故事内容由大语言模型实时生成。为了提升阅读体验，故事文字将被渲染成图片发送。\n\n"
+            "本游戏由AI驱动，故事内容由大语言模型实时生成。\n\n"
             "**💡 游戏玩法**：\n"
             f"1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
             f"2. DM会根据你的行动推进故事，每回合有 **{self.session_timeout}秒** 的行动时间，超时游戏将自动结束。\n"
@@ -104,17 +104,8 @@ class TextAdventurePlugin(Star):
             story_text = llm_response.completion_text
             game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
-            # 将返回的文字渲染为图片
-            try:
-                image_path = await self.text_to_image(story_text, return_url=False)
-                message_chain = MessageChain([
-                    Comp.Image.from_file_system(image_path),
-                    Comp.Plain(f"\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
-                ])
-                yield message_chain
-            except Exception as img_e:
-                logger.error(f"文字转图片失败: {img_e}，将发送纯文本。")
-                yield event.plain_result(f"{story_text}\n\n[文字渲染图片失败]\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
+            # 直接发送纯文本结果
+            yield event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
 
         except Exception as e:
             logger.error(f"开始冒险时LLM调用失败: {e}")
@@ -135,11 +126,11 @@ class TextAdventurePlugin(Star):
 
             player_action = event.message_str.strip()
             if not player_action:
-                await event.send(MessageChain([Comp.Plain(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})")]))
+                await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
                 return
             
-            await event.send(MessageChain([Comp.Plain("AI正在构思下一幕...请稍等片刻...")]))
+            await event.send(event.plain_result("AI正在构思下一幕...请稍等片刻..."))
             game_state["llm_conversation_context"].append({"role": "user", "content": player_action})
 
             try:
@@ -156,23 +147,13 @@ class TextAdventurePlugin(Star):
                     controller.stop()
                     return
 
-                # 将返回的文字渲染为图片
-                try:
-                    image_path = await self.text_to_image(story_text, return_url=False)
-                    message_chain = MessageChain([
-                        Comp.Image.from_file_system(image_path),
-                        Comp.Plain(f"\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
-                    ])
-                    await event.send(message_chain)
-                except Exception as img_e:
-                    logger.error(f"文字转图片失败: {img_e}，将发送纯文本。")
-                    await event.send(event.plain_result(f"{story_text}\n\n[文字渲染图片失败]\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
-
+                # 直接发送纯文本结果
+                await event.send(event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
 
             except Exception as e:
                 logger.error(f"冒险过程中LLM调用失败: {e}")
-                await event.send(MessageChain([Comp.Plain(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {user_id})")]))
+                await event.send(event.plain_result(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {user_id})"))
                 if user_id in self.active_game_sessions:
                     del self.active_game_sessions[user_id]
                 controller.stop()
@@ -266,8 +247,8 @@ class TextAdventurePlugin(Star):
         显示动态文字冒险插件的所有可用命令。
         """
         help_message = (
-            "📜 **动态图文冒险 - 帮助手册** 📜\n\n"
-            "欢迎来到由AI驱动的图文冒险世界！在此版本中，故事文字会被渲染成图片发送。\n\n"
+            "📜 **动态文字冒险 - 帮助手册** 📜\n\n"
+            "欢迎来到由AI驱动的文字冒险世界！\n\n"
             "**基本指令**:\n"
             "  - `/开始冒险 [可选主题]`：开始一场新冒险。若不指定主题，则使用默认主题。\n"
             "    *例如: /开始冒险 探索一座被遗忘的深海城市*\n"
@@ -276,8 +257,8 @@ class TextAdventurePlugin(Star):
             "**管理员指令**:\n"
             "  - `/admin end`：强制结束所有正在进行的游戏。\n\n"
             "**💡 游戏玩法**:\n"
-            "  - 游戏开始后，AI游戏主持人会发送一张包含故事场景的图片。\n"
-            "  - 您只需直接输入您的行动（例如“调查那个奇怪的符号”，“和酒馆老板搭话”），AI便会根据您的输入推进故事，并发送新的场景图片。\n"
+            "  - 游戏开始后，AI游戏主持人会为您生成故事场景。\n"
+            "  - 您只需直接输入您的行动（例如“调查那个奇怪的符号”，“和酒馆老板搭话”），AI便会根据您的输入推进故事发展。\n"
         )
         yield event.plain_result(help_message)
         event.stop_event()
