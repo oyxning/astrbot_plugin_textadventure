@@ -45,7 +45,7 @@ class TextAdventurePlugin(Star):
             "本游戏由AI驱动，故事内容由大语言模型实时生成，可能包含虚构、不符合逻辑的情节。游戏旨在提供娱乐，请勿与现实混淆。\n\n"
             "**💡 游戏玩法**：\n"
             "1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
-            "2. DM会根据你的行动推进故事，每回合有 **300秒** 的行动时间，超时游戏将自动结束。\n"
+            "2. DM会根据你的行动推进故事，每回合有 **15秒** 的行动时间，超时游戏将自动结束。\n" # NEW: 更新超时时间
             "3. 你可以随时发送 `/结束冒险` 或 `/强制结束冒险` 来退出游戏。\n\n"
             "现在，冒险即将开始... 祝你旅途愉快！"
         )
@@ -93,7 +93,7 @@ class TextAdventurePlugin(Star):
             return
 
         # 定义会话等待器
-        @session_waiter(timeout=300, record_history_chains=False)
+        @session_waiter(timeout=15, record_history_chains=False) # NEW: 更新超时时间
         async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
             user_id = event.get_sender_id()
 
@@ -109,7 +109,7 @@ class TextAdventurePlugin(Star):
             player_action = event.message_str.strip()
             if not player_action:
                 await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
-                controller.keep(timeout=300, reset_timeout=True)
+                controller.keep(timeout=15, reset_timeout=True) # NEW: 更新超时时间
                 return
 
             # 添加用户行动到上下文
@@ -135,7 +135,7 @@ class TextAdventurePlugin(Star):
                     f"**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"
                 )
                 await event.send(event.plain_result(full_story_message))
-                controller.keep(timeout=300, reset_timeout=True)
+                controller.keep(timeout=15, reset_timeout=True) # NEW: 更新超时时间
 
             except Exception as e:
                 logger.error(f"冒险过程中LLM调用失败: {e}")
