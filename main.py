@@ -155,7 +155,7 @@ class TextAdventurePlugin(Star):
             if user_id in self.active_game_sessions:
                 del self.active_game_sessions[user_id]
                 logger.info(f"用户 {user_id} 的游戏会话已清理并从 active_game_sessions 中移除。")
-            # event.stop_event() 只在明确的终止命令中调用，这里不再自动终止事件
+            # 不再调用 event.stop_event()，只在命令处理函数结尾调用
 
     @filter.command("结束冒险")
     async def end_adventure(self, event: AstrMessageEvent):
@@ -180,7 +180,7 @@ class TextAdventurePlugin(Star):
             )
         else:
             yield event.plain_result(f"您当前没有正在进行的冒险。\n(玩家ID: {user_id})")
-        event.stop_event()
+        # event.stop_event() 只在命令处理函数结尾调用
 
     @filter.command("强制结束冒险")
     async def force_end_adventure(self, event: AstrMessageEvent):
@@ -201,8 +201,7 @@ class TextAdventurePlugin(Star):
             )
         else:
             yield event.plain_result(f"您当前没有正在进行的冒险。\n(玩家ID: {user_id})")
-        event.stop_event()
-
+        # event.stop_event() 只在命令处理函数结尾调用
 
     @filter.command("admin end")
     async def cmd_admin_end_all_games(self, event: AstrMessageEvent):
