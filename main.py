@@ -104,17 +104,8 @@ class TextAdventurePlugin(Star):
             story_text = llm_response.completion_text
             game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
-            # 将返回的文字渲染为图片
-            try:
-                image_path = await self.text_to_image(story_text, return_url=False)
-                message_chain = MessageChain([
-                    Comp.Image.from_file_system(image_path),
-                    Comp.Plain(f"\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
-                ])
-                yield message_chain
-            except Exception as img_e:
-                logger.error(f"文字转图片失败: {img_e}，将发送纯文本。")
-                yield event.plain_result(f"{story_text}\n\n[文字渲染图片失败]\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
+            # 将返回的文字渲染为图片（已去除图片渲染，直接发送纯文本）
+            yield event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
 
         except Exception as e:
             logger.error(f"开始冒险时LLM调用失败: {e}")
@@ -156,17 +147,8 @@ class TextAdventurePlugin(Star):
                     controller.stop()
                     return
 
-                # 将返回的文字渲染为图片
-                try:
-                    image_path = await self.text_to_image(story_text, return_url=False)
-                    message_chain = MessageChain([
-                        Comp.Image.from_file_system(image_path),
-                        Comp.Plain(f"\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
-                    ])
-                    await event.send(message_chain)
-                except Exception as img_e:
-                    logger.error(f"文字转图片失败: {img_e}，将发送纯文本。")
-                    await event.send(event.plain_result(f"{story_text}\n\n[文字渲染图片失败]\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
+                # 将返回的文字渲染为图片（已去除图片渲染，直接发送纯文本）
+                await event.send(event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
 
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
 
