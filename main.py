@@ -1,7 +1,6 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api import AstrBotConfig
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import asyncio
 from typing import Dict # 导入 Dict 用于类型提示
@@ -15,8 +14,6 @@ class TextAdventurePlugin(Star):
         # 存储活跃的游戏会话，键为 sender_id，值为 SessionController 实例
         self.active_game_sessions: Dict[str, SessionController] = {} 
         logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}")
-
-    # 移除 _get_first_paragraph 方法，因为用户不再需要截取LLM回复的第一段
 
     @filter.command("开始冒险")
     async def start_adventure(self, event: AstrMessageEvent, theme: str = None):
@@ -32,7 +29,7 @@ class TextAdventurePlugin(Star):
             yield event.plain_result(f"你已经有一个正在进行的冒险了！请先使用 /结束冒险 来结束当前游戏，或继续你的行动。 (当前游戏用户的ID是 {user_id})")
             return
 
-        # 1. 发送免责声明和游玩方式
+        # 发送免责声明和游玩方式
         disclaimer_and_instructions = (
             "📜 动态文字冒险 - 游戏须知 📜\n\n"
             "免责声明：\n"
@@ -86,7 +83,6 @@ class TextAdventurePlugin(Star):
                 system_prompt="", # System prompt 已包含在 contexts 中
             )
             
-            # 不再截取LLM回复的第一段
             initial_story_text = llm_response.completion_text
             game_state["llm_conversation_context"].append({"role": "assistant", "content": initial_story_text})
             
@@ -101,7 +97,6 @@ class TextAdventurePlugin(Star):
             @session_waiter(timeout=300, record_history_chains=False) # 设置每回合5分钟超时
             async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
                 # 将 SessionController 实例存储到活跃会话字典中
-                # 这样做是为了可以在外部（如 /结束冒险 或 /admin end）访问并停止此会话
                 self.active_game_sessions[event.get_sender_id()] = controller 
                 
                 player_action = event.message_str.strip() # 获取玩家输入的行动
@@ -129,7 +124,6 @@ class TextAdventurePlugin(Star):
                         system_prompt="",
                     )
                     
-                    # 不再截取LLM回复的第一段
                     story_text = llm_response.completion_text
                     game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
@@ -168,6 +162,7 @@ class TextAdventurePlugin(Star):
                 # 无论会话如何结束（正常结束、超时、错误、被外部 stop），都从活跃会话中移除
                 if user_id in self.active_game_sessions:
                     del self.active_game_sessions[user_id]
+                    logger.info(f"用户 {user_id} 的游戏会话已从 active_game_sessions 中移除。")
                 event.stop_event() # 确保事件在游戏会话结束后停止传播
 
         except Exception as e:
@@ -185,8 +180,11 @@ class TextAdventurePlugin(Star):
         user_id = event.get_sender_id()
         if user_id in self.active_game_sessions:
             controller = self.active_game_sessions[user_id]
-            controller.stop() # 立即停止会话。这会触发 adventure_waiter 中的 finally 块进行清理。
-            yield event.plain_result(f"✅ 冒险已结束。感谢您的参与！ (当前游戏用户的ID是 {user_id})")
+            controller.stop() # 立即尝试停止会话。这会触发 adventure_waiter 中的 finally 块进行清理。
+            yield event.plain_result(
+                f"✅ 冒险结束指令已发出，游戏会话正在终止。如果游戏界面没有立即消失，请稍等片刻，它会在当前回合结束后终止。感谢您的参与！ "
+                f"(当前游戏用户的ID是 {user_id})"
+            )
         else:
             yield event.plain_result(f"你当前没有正在进行的冒险。 (当前游戏用户的ID是 {user_id})")
         event.stop_event() # 停止事件传播
@@ -213,12 +211,10 @@ class TextAdventurePlugin(Star):
             controller.stop() # 停止会话
             stopped_count += 1
         
-        # 由于 controller.stop() 是异步操作，且清理发生在被停止会话的 finally 块，
-        # 这里的 clear() 可能会在所有会话实际结束前执行。
-        # 依赖 finally 块的清理是更安全的做法，但为确保状态最终一致，可以在逻辑上理解为清空。
-        # self.active_game_sessions.clear() # 不直接清空，依赖finally块的清理
-
-        yield event.plain_result(f"✅ 已成功尝试结束 {stopped_count} 个活跃的文字冒险游戏进程。")
+        yield event.plain_result(
+            f"✅ 已向 {stopped_count} 个活跃的文字冒险游戏进程发出终止指令。请注意，如果游戏正在等待 LLM 响应，可能需要等待该响应完成后才能完全终止。在极端情况下，如果游戏长时间卡住，可能需要手动重载插件。 "
+            f"(管理员ID是 {event.get_sender_id()})"
+        )
         logger.info(f"管理员 {event.get_sender_id()} 结束了所有 {stopped_count} 个游戏进程。")
         event.stop_event()
 
