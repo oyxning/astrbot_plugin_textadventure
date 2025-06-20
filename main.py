@@ -155,7 +155,7 @@ class TextAdventurePlugin(Star):
             if user_id in self.active_game_sessions:
                 del self.active_game_sessions[user_id]
                 logger.info(f"用户 {user_id} 的游戏会话已清理并从 active_game_sessions 中移除。")
-            event.stop_event()
+            # event.stop_event() 只在明确的终止命令中调用，这里不再自动终止事件
 
     @filter.command("结束冒险")
     async def end_adventure(self, event: AstrMessageEvent):
