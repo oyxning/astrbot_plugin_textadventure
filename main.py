@@ -10,20 +10,40 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 
-@register("textadventure", "YourName", "一个将故事文字渲染为图片的动态冒险小游戏", "1.3.0")
+@register("textadventure", "YourName", "一个将故事文字渲染为图片的动态冒险小游戏", "1.4.1")
 class TextAdventurePlugin(Star):
     """
     一个由LLM驱动的图文动态文字冒险游戏插件。
     此版本将AI生成的故事文字直接渲染为图片进行展示，并包含健壮的会话管理。
+    核心参数（如超时时间、系统提示词）均可通过配置文件修改。
     """
 
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+        
+        # 从配置文件读取设置，并提供默认值
         self.default_adventure_theme = self.config.get("default_adventure_theme", "奇幻世界")
+        self.session_timeout = self.config.get("session_timeout", 300)
+        self.system_prompt_template = self.config.get(
+            "system_prompt_template",
+            "你是一位经验丰富的文字冒险游戏主持人(Game Master)。你将在一个'{game_theme}'主题下，根据玩家的行动实时生成独特且逻辑连贯的故事情节。"
+            "你的目标是创造一个引人入胜、充满未知的故事。你的回复应包含：\n"
+            "1. 对场景的生动描述。\n"
+            "2. 玩家的当前状况。\n"
+            "3. 引导玩家思考下一步行动，可以给出几个选项（例如：A. ... B. ...），或直接鼓励玩家自由探索。\n"
+            "请确保故事风格一致，并避免重复。保持回复在200-300字左右，以便渲染为图片。"
+        )
+        
+        # 增加日志记录，方便调试，确认配置是否加载成功
+        logger.info("--- TextAdventurePlugin 配置加载 ---")
+        logger.info(f"默认主题: {self.default_adventure_theme}")
+        logger.info(f"会话超时: {self.session_timeout} 秒")
+        logger.info(f"系统提示词模板: {self.system_prompt_template[:70]}...")
+        logger.info("------------------------------------")
+
         # 存储活跃的游戏会话。键: sender_id, 值: SessionController 实例
         self.active_game_sessions: Dict[str, SessionController] = {}
-        logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}")
 
     @filter.command("开始冒险")
     async def start_adventure(self, event: AstrMessageEvent, theme: str = ""):
@@ -45,8 +65,8 @@ class TextAdventurePlugin(Star):
             "**免责声明**：\n"
             "本游戏由AI驱动，故事内容由大语言模型实时生成。为了提升阅读体验，故事文字将被渲染成图片发送。\n\n"
             "**💡 游戏玩法**：\n"
-            "1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
-            "2. DM会根据你的行动推进故事，每回合有 **300秒** 的行动时间，超时游戏将自动结束。\n"
+            f"1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
+            f"2. DM会根据你的行动推进故事，每回合有 **{self.session_timeout}秒** 的行动时间，超时游戏将自动结束。\n"
             "3. 你可以随时发送 `/结束冒险` 或 `/强制结束冒险` 来退出游戏。\n\n"
             "现在，冒险即将开始... 祝你旅途愉快！"
         )
@@ -58,15 +78,13 @@ class TextAdventurePlugin(Star):
             "llm_conversation_context": [],  # OpenAI格式的对话历史
         }
 
-        # 构建系统提示词
-        system_prompt = (
-            f"你是一位经验丰富的文字冒险游戏主持人(Game Master)。你将在一个'{game_theme}'主题下，根据玩家的行动实时生成独特且逻辑连贯的故事情节。"
-            "你的目标是创造一个引人入胜、充满未知的故事。你的回复应包含：\n"
-            "1. 对场景的生动描述。\n"
-            "2. 玩家的当前状况。\n"
-            "3. 引导玩家思考下一步行动，可以给出几个选项（例如：A. ... B. ...），或直接鼓励玩家自由探索。\n"
-            "请确保故事风格一致，并避免重复。保持回复在200-300字左右，以便渲染为图片。"
-        )
+        # 使用配置文件中的模板构建系统提示词
+        try:
+            system_prompt = self.system_prompt_template.format(game_theme=game_theme)
+        except KeyError:
+            logger.error("系统提示词模板格式错误！缺少 `{game_theme}` 占位符。将使用默认模板。")
+            system_prompt = f"你是一位经验丰富的文字冒险游戏主持人(Game Master)。你将在一个'{game_theme}'主题下，根据玩家的行动实时生成独特且逻辑连贯的故事情节。"
+        
         game_state["llm_conversation_context"].append({"role": "system", "content": system_prompt})
         game_state["llm_conversation_context"].append({"role": "user", "content": f"故事开始了，我的第一个场景是什么？"})
 
@@ -103,8 +121,8 @@ class TextAdventurePlugin(Star):
             yield event.plain_result(f"抱歉，无法开始冒险，LLM服务出现问题。(玩家ID: {user_id})")
             return
 
-        # 定义会话等待器
-        @session_waiter(timeout=300, record_history_chains=False)
+        # 定义会话等待器，使用配置文件中的超时时间
+        @session_waiter(timeout=self.session_timeout, record_history_chains=False)
         async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
             user_id = event.get_sender_id()
 
@@ -118,7 +136,7 @@ class TextAdventurePlugin(Star):
             player_action = event.message_str.strip()
             if not player_action:
                 await event.send(MessageChain([Comp.Plain(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})")]))
-                controller.keep(timeout=300, reset_timeout=True)
+                controller.keep(timeout=self.session_timeout, reset_timeout=True)
                 return
             
             await event.send(MessageChain([Comp.Plain("AI正在构思下一幕...请稍等片刻...")]))
@@ -150,7 +168,7 @@ class TextAdventurePlugin(Star):
                     logger.error(f"文字转图片失败: {img_e}，将发送纯文本。")
                     await event.send(event.plain_result(f"{story_text}\n\n[文字渲染图片失败]\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
 
-                controller.keep(timeout=300, reset_timeout=True)
+                controller.keep(timeout=self.session_timeout, reset_timeout=True)
 
             except Exception as e:
                 logger.error(f"冒险过程中LLM调用失败: {e}")
@@ -257,6 +275,9 @@ class TextAdventurePlugin(Star):
             "  - `/强制结束冒险`：**立即结束**当前游戏。当游戏卡住时使用此指令。\n\n"
             "**管理员指令**:\n"
             "  - `/admin end`：强制结束所有正在进行的游戏。\n\n"
+            "**💡 游戏玩法**:\n"
+            "  - 游戏开始后，AI游戏主持人会发送一张包含故事场景的图片。\n"
+            "  - 您只需直接输入您的行动（例如“调查那个奇怪的符号”，“和酒馆老板搭话”），AI便会根据您的输入推进故事，并发送新的场景图片。\n"
         )
         yield event.plain_result(help_message)
         event.stop_event()
