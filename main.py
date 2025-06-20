@@ -6,7 +6,7 @@ from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import asyncio
 import json
 
-@register("textadventure", "LumineStory", "一个动态文字冒险小游戏", "1.0.0")
+@register("textadventure", "YourName", "一个动态文字冒险小游戏", "1.0.0")
 class TextAdventurePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -85,8 +85,10 @@ class TextAdventurePlugin(Star):
             @session_waiter(timeout=300, record_history_chains=False) # 设置每回合5分钟超时
             async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
                 player_action = event.message_str.strip() # 获取玩家输入的行动
+                
+                # 明确指出用户向AI发送什么可以进行下一步
                 if not player_action:
-                    yield event.plain_result("你什么也没做。请告诉我你的行动。")
+                    await event.send(event.plain_result("你什么也没做。请告诉我你的行动，例如 '向左走' 或 '调查声音'。"))
                     controller.keep(timeout=300, reset_timeout=True) # 保持会话并重置超时
                     return
 
@@ -106,12 +108,13 @@ class TextAdventurePlugin(Star):
                     story_text = llm_response.completion_text
                     game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
-                    yield event.plain_result(story_text)
+                    # 修复：使用 await event.send() 而非 yield event.plain_result()
+                    await event.send(event.plain_result(story_text))
                     controller.keep(timeout=300, reset_timeout=True) # 重置超时时间，等待下一回合玩家输入
 
                 except Exception as e:
                     logger.error(f"LLM调用失败: {e}")
-                    yield event.plain_result("抱歉，冒险过程中LLM服务出现问题，游戏暂时无法继续。请尝试 /结束冒险 并重新开始。")
+                    await event.send(event.plain_result("抱歉，冒险过程中LLM服务出现问题，游戏暂时无法继续。请尝试 /结束冒险 并重新开始。"))
                     controller.stop() # LLM调用失败时结束会话
 
             try:
@@ -151,9 +154,8 @@ class TextAdventurePlugin(Star):
             "  - /结束冒险: 随时结束当前的冒险游戏。\n\n"
             "💡 游戏玩法:\n"
             "  - 游戏开始后，AI (游戏主持人) 会生成开场场景并提供行动选项，或提示你自由输入行动。\n"
-            "  - 输入你的行动（例如“调查巷子里的声音”，“尝试进入酒吧”），行动可以非常具体和创新。\n"
-            "  - AI 将根据你的行动，实时生成后续故事、新场景、遇到的角色、以及随之而来的挑战和后果。\n"
-            "  - 游戏没有固定结局，完全开放，玩家的目标是探索、生存或达成自己的目标。\n\n"
+            "  - **如何进行下一步**: 直接输入你的行动（例如“调查巷子里的声音”，“尝试进入酒吧”），AI 将根据你的输入推进故事。\n"
+            "  - 行动可以非常具体和创新。游戏没有固定结局，完全开放，玩家的目标是探索、生存或达成自己的目标。\n\n"
             "⏱️ 超时说明:\n"
             "  - 每回合你有300秒（5分钟）的时间输入行动。\n"
             "  - 如果超时未输入，游戏将自动结束，你的角色将陷入沉睡。你可以使用 /开始冒险 重新开始。\n\n"
