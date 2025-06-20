@@ -190,6 +190,42 @@ class TextAdventurePlugin(Star):
             yield event.plain_result(f"你当前没有正在进行的冒险。 (当前游戏用户的ID是 {user_id})")
         event.stop_event() # 停止事件传播
 
+    @filter.command("user 结束冒险")
+    async def cmd_user_end_adventure_force(self, event: AstrMessageEvent):
+        """
+        用户命令：在5秒后结束当前的文字冒险游戏，并尝试断开与LLM的连接。
+        此命令会发出强制终止信号，但如果LLM正在处理请求，可能需要等待其完成后才能完全终止。
+        """
+        user_id = event.get_sender_id()
+        if user_id not in self.active_game_sessions:
+            yield event.plain_result(f"你当前没有正在进行的冒险。 (当前游戏用户的ID是 {user_id})")
+            event.stop_event()
+            return
+
+        controller = self.active_game_sessions[user_id]
+        
+        yield event.plain_result(
+            f"收到您的指令，将在5秒后尝试强制结束当前冒险。如果游戏仍在等待AI响应，可能需要等待该响应完成后才能完全终止。 (当前游戏用户的ID是 {user_id})"
+        )
+        
+        # Signal the session to stop
+        controller.stop()
+
+        # Wait for 5 seconds
+        await asyncio.sleep(5)
+
+        # Check if the session has effectively stopped (i.e., removed from active_game_sessions by its finally block)
+        if user_id not in self.active_game_sessions:
+            yield event.plain_result(
+                f"✅ 冒险已成功终止！与AI的会话已断开。 (当前游戏用户的ID是 {user_id})"
+            )
+        else:
+            # If still in active_game_sessions, it means the underlying LLM call is still blocking
+            yield event.plain_result(
+                f"⚠️ 冒险终止尝试完成，但游戏会话仍在活跃中。AI可能仍在处理一个长时间的请求。请尝试等待或联系管理员使用 /admin end 命令。 (当前游戏用户的ID是 {user_id})"
+            )
+        event.stop_event()
+
     @filter.command("admin end")
     async def cmd_admin_end_all_games(self, event: AstrMessageEvent):
         """
@@ -232,11 +268,11 @@ class TextAdventurePlugin(Star):
             "    - 例如: /开始冒险 在一个赛博朋克城市\n"
             "    - 如果不指定主题，将使用默认主题。\n"
             "  - /结束冒险: 随时结束当前的冒险游戏。\n"
+            "  - /user 结束冒险: 尝试在5秒后强制结束游戏，并断开与LLM的会话。\n" # Added new command to help
             "  - /admin end (仅管理员可用): 结束所有活跃的冒险游戏进程。\n\n"
             "💡 游戏玩法:\n"
             "  - 游戏开始后，AI (游戏主持人) 会生成开场场景并提供行动选项，或提示你自由输入行动。\n"
-            "  - **如何进行下一步**: 直接输入你的行动（例如“调查巷子里的声音”，“尝试进入酒吧”），AI 将根据你的输入推进故事。\n"
-            "  - 行动可以非常具体和创新。游戏没有固定结局，完全开放，玩家的目标是探索、生存或达成自己的目标。\n\n"
+            "  - **如何进行下一步**: 直接输入你的行动（例如“调查巷子里的声音”，“尝试进入酒吧”），AI 将根据你的输入推进故事。\n\n"
             "⏱️ 超时说明:\n"
             "  - 每回合你有300秒（5分钟）的时间输入行动。\n"
             "  - 如果超时未输入，游戏将自动结束，你的角色将陷入沉睡。你可以使用 /开始冒险 重新开始。\n\n"
@@ -252,4 +288,4 @@ class TextAdventurePlugin(Star):
             controller.stop()
             logger.info(f"终止插件时停止了用户 {user_id} 的游戏会话。")
         self.active_game_sessions.clear() # 确保在插件卸载时彻底清空
-        logger.info("TextAdventurePlugin terminated.")
+        logger.info("TextAdventurePlugin terminated。")
