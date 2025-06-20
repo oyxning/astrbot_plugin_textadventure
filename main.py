@@ -135,7 +135,8 @@ class TextAdventurePlugin(Star):
                     f"**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"
                 )
                 await event.send(event.plain_result(full_story_message))
-                controller.keep(timeout=15, reset_timeout=True) # NEW: 更新超时时间
+                # 递归进入下一回合，重置计时器
+                await adventure_waiter(event)
 
             except Exception as e:
                 logger.error(f"冒险过程中LLM调用失败: {e}")
