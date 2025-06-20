@@ -10,7 +10,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 
-@register("textadventure", "YourName", "一个纯文字的动态冒险小游戏", "1.5.0")
+@register("textadventure", "YourName", "一个纯文字的动态冒险小游戏", "1.0.0")
 class TextAdventurePlugin(Star):
     """
     一个由LLM驱动的纯文字动态文字冒险游戏插件。
@@ -103,10 +103,7 @@ class TextAdventurePlugin(Star):
             )
             story_text = llm_response.completion_text
             game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
-
-            # 直接发送纯文本结果
             yield event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})")
-
         except Exception as e:
             logger.error(f"开始冒险时LLM调用失败: {e}")
             yield event.plain_result(f"抱歉，无法开始冒险，LLM服务出现问题。(玩家ID: {user_id})")
@@ -115,18 +112,21 @@ class TextAdventurePlugin(Star):
         # 定义会话等待器，使用配置文件中的超时时间
         @session_waiter(timeout=self.session_timeout, record_history_chains=False)
         async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
-            user_id = event.get_sender_id()
+            current_user_id = event.get_sender_id()
+            
+            # 只有当会话第一次启动时，才将其加入活跃列表
+            if current_user_id not in self.active_game_sessions:
+                self.active_game_sessions[current_user_id] = controller
 
-            if user_id not in self.active_game_sessions:
-                logger.info(f"会话 for {user_id} 已被强制终止，停止处理新的行动。")
+            # 检查会话是否已被外部命令终止
+            if current_user_id not in self.active_game_sessions:
+                logger.info(f"会话 for {current_user_id} 已被强制终止，停止处理新的行动。")
                 controller.stop()
                 return
 
-            self.active_game_sessions[user_id] = controller
-
             player_action = event.message_str.strip()
             if not player_action:
-                await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
+                await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {current_user_id})"))
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
                 return
             
@@ -142,25 +142,23 @@ class TextAdventurePlugin(Star):
                 story_text = llm_response.completion_text
                 game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
-                if user_id not in self.active_game_sessions:
-                    logger.info(f"会话 for {user_id} 在LLM响应期间被强制终止，不再发送消息。")
+                if current_user_id not in self.active_game_sessions:
+                    logger.info(f"会话 for {current_user_id} 在LLM响应期间被强制终止，不再发送消息。")
                     controller.stop()
                     return
 
-                # 直接发送纯文本结果
-                await event.send(event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"))
+                await event.send(event.plain_result(f"{story_text}\n\n**[提示: 请直接输入你的行动]** (玩家ID: {current_user_id})"))
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
 
             except Exception as e:
                 logger.error(f"冒险过程中LLM调用失败: {e}")
-                await event.send(event.plain_result(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {user_id})"))
-                if user_id in self.active_game_sessions:
-                    del self.active_game_sessions[user_id]
+                await event.send(event.plain_result(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {current_user_id})"))
+                if current_user_id in self.active_game_sessions:
+                    del self.active_game_sessions[current_user_id]
                 controller.stop()
 
         # 启动会话
         try:
-            self.active_game_sessions[user_id] = None # 先占个位置
             await adventure_waiter(event)
         except asyncio.TimeoutError:
             yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
@@ -180,14 +178,18 @@ class TextAdventurePlugin(Star):
         """
         user_id = event.get_sender_id()
         if user_id in self.active_game_sessions:
-            controller = self.active_game_sessions[user_id]
+            controller = self.active_game_sessions.get(user_id)
             if controller:
-                controller.stop() # 发出停止信号
-            yield event.plain_result(
-                f"✅ **冒险结束指令已发出**。\n"
-                f"如果AI正在响应，将在本回合结束后终止。如果游戏长时间无响应，请使用 /强制结束冒险。\n"
-                f"(玩家ID: {user_id})"
-            )
+                controller.stop() # 发出停止信号，这将触发adventure_waiter的finally块
+                yield event.plain_result(
+                    f"✅ **冒险结束指令已发出**。\n"
+                    f"游戏将在当前回合结束后终止。如果长时间无响应，请使用 /强制结束冒险。\n"
+                    f"(玩家ID: {user_id})"
+                )
+            else:
+                 # 这种情况理论上不应该发生，但作为健壮性检查
+                del self.active_game_sessions[user_id]
+                yield event.plain_result(f"会话状态异常，已强制清理。您现在可以开始新的冒险了。(玩家ID: {user_id})")
         else:
             yield event.plain_result(f"您当前没有正在进行的冒险。\n(玩家ID: {user_id})")
         event.stop_event()
@@ -232,7 +234,8 @@ class TextAdventurePlugin(Star):
         for user_id, controller in list(self.active_game_sessions.items()):
             if controller:
                 controller.stop()
-            del self.active_game_sessions[user_id] # 强制移除
+            # pop(user_id, None) 确保即使字典在迭代过程中被改变也能安全运行
+            self.active_game_sessions.pop(user_id, None) 
         
         yield event.plain_result(
             f"✅ **管理员操作完成**。\n"
