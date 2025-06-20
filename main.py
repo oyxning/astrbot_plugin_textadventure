@@ -1,6 +1,6 @@
 # main.py
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -20,8 +20,8 @@ class TextAdventurePlugin(Star):
         super().__init__(context)
         self.config = config
         self.default_adventure_theme = self.config.get("default_adventure_theme", "奇幻世界")
-        # 存储活跃的游戏会话。键: sender_id, 值: SessionController 实例
-        self.active_game_sessions: Dict[str, SessionController] = {}
+        # 存储活跃的游戏会话。键: sender_id, 值: SessionController 实例或"PENDING"
+        self.active_game_sessions: Dict[str, Any] = {}
         logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}")
 
     @filter.command("开始冒险")
@@ -102,7 +102,8 @@ class TextAdventurePlugin(Star):
                 logger.info(f"会话 for {user_id} 已被强制终止，停止处理新的行动。")
                 controller.stop() # 确保会话状态最终被清理
                 return
-
+            
+            # 使用实际的控制器实例更新会话
             self.active_game_sessions[user_id] = controller
 
             player_action = event.message_str.strip()
@@ -142,9 +143,11 @@ class TextAdventurePlugin(Star):
                 if user_id in self.active_game_sessions:
                     del self.active_game_sessions[user_id]
                 controller.stop()
-
+        
         # 启动会话
         try:
+            # FIX: 在启动等待器之前将会话标记为“待处理”
+            self.active_game_sessions[user_id] = "PENDING"
             await adventure_waiter(event)
         except asyncio.TimeoutError:
             yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
@@ -166,7 +169,13 @@ class TextAdventurePlugin(Star):
         user_id = event.get_sender_id()
         if user_id in self.active_game_sessions:
             controller = self.active_game_sessions[user_id]
-            controller.stop() # 发出停止信号
+            # FIX: 检查控制器是否为有效实例
+            if isinstance(controller, SessionController):
+                controller.stop() # 发出停止信号
+            else:
+                # 如果会话仍处于“待处理”状态，则直接删除
+                del self.active_game_sessions[user_id]
+
             # 注意：这里不立即删除 session，让其自然结束并由 finally 块清理
             yield event.plain_result(
                 f"✅ **冒险结束指令已发出**。\n"
@@ -185,7 +194,9 @@ class TextAdventurePlugin(Star):
         user_id = event.get_sender_id()
         if user_id in self.active_game_sessions:
             controller = self.active_game_sessions.pop(user_id) # 立即从活跃会话中移除
-            controller.stop() # 同时发出停止信号以触发清理
+            # FIX: 检查控制器是否为有效实例
+            if isinstance(controller, SessionController):
+                controller.stop() # 同时发出停止信号以触发清理
             logger.info(f"用户 {user_id} 的游戏会话已被强制终止。")
             yield event.plain_result(
                 f"💥 **冒险已强制终止！**\n"
@@ -215,7 +226,9 @@ class TextAdventurePlugin(Star):
         stopped_count = len(self.active_game_sessions)
         # 迭代字典的副本以安全地修改原字典
         for user_id, controller in list(self.active_game_sessions.items()):
-            controller.stop()
+            # FIX: 检查控制器是否为有效实例
+            if isinstance(controller, SessionController):
+                controller.stop()
             del self.active_game_sessions[user_id] # 强制移除
         
         yield event.plain_result(
@@ -251,7 +264,9 @@ class TextAdventurePlugin(Star):
         logger.info("正在终止 TextAdventurePlugin 并清理所有活跃的游戏会话...")
         if self.active_game_sessions:
             for user_id, controller in list(self.active_game_sessions.items()):
-                controller.stop()
+                # FIX: 检查控制器是否为有效实例
+                if isinstance(controller, SessionController):
+                    controller.stop()
             self.active_game_sessions.clear()
             logger.info("所有活跃的游戏会话已被终止。")
         logger.info("TextAdventurePlugin terminated。")
