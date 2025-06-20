@@ -104,8 +104,10 @@ class TextAdventurePlugin(Star):
             player_action = event.message_str.strip()
             if not player_action:
                 await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
+                # 只在输入为空时延长等待，否则直接 return
                 controller.keep(timeout=15, reset_timeout=True)
                 return None, controller
+            # 正常输入直接 return，主循环会重新 await，触发新计时器
             return player_action, controller
 
         # 启动主回合循环
@@ -115,7 +117,7 @@ class TextAdventurePlugin(Star):
                 try:
                     player_action, controller = await adventure_waiter(event)
                 except asyncio.TimeoutError:
-                    yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
+                    yield event.plain_result(f"⏱ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
                     break
                 except Exception as e:
                     logger.error(f"冒险游戏发生未知错误(输入阶段): {e}")
