@@ -9,20 +9,24 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 
-@register("textadventure", "YourName", "一个动态文字冒险小游戏", "1.1.0")
+@register("textadventure", "LumineStory", "一个动态文字冒险小游戏，由LLM作为游戏主持人。", "1.1.0")
 class TextAdventurePlugin(Star):
     """
     一个由LLM驱动的动态文字冒险游戏插件。
-    此版本包含健壮的会话管理，并提供了优雅和强制两种终止命令。
+    支持自定义冒险主题、超时时间和系统提示模板。
     """
 
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.default_adventure_theme = self.config.get("default_adventure_theme", "奇幻世界")
-        # 存储活跃的游戏会话。键: sender_id, 值: SessionController 实例或"PENDING"
+        self.session_timeout = self.config.get("session_timeout", 15)  # 默认15秒
+        self.system_prompt_template = self.config.get(
+            "system_prompt_template",
+            "你是一位经验丰富的文字冒险游戏主持人(Game Master)。你将在一个'{game_theme}'主题下，根据玩家的行动实时生成独特且逻辑连贯的故事情节。你的回复应包含：\n1. 对场景的生动描述。\n2. 玩家的当前状况。\n3. 引导玩家思考下一步行动，可以给出几个选项（例如：A. ... B. ...），或直接鼓励玩家自由探索。保持回复简洁（约200字），避免重复，并维持故事的神秘感和趣味性。"
+        )
         self.active_game_sessions: Dict[str, Any] = {}
-        logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}")
+        logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}, timeout: {self.session_timeout}s")
 
     @filter.command("开始冒险")
     async def start_adventure(self, event: AstrMessageEvent, theme: str = ""):
@@ -44,8 +48,8 @@ class TextAdventurePlugin(Star):
             "**免责声明**：\n"
             "本游戏由AI驱动，故事内容由大语言模型实时生成，可能包含虚构、不符合逻辑的情节。游戏旨在提供娱乐，请勿与现实混淆。\n\n"
             "**💡 游戏玩法**：\n"
-            "1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
-            "2. DM会根据你的行动推进故事，每回合有 **15秒** 的行动时间，超时游戏将自动结束。\n" # NEW: 更新超时时间
+            f"1. 游戏主持人(DM)会描述场景，你可以自由输入行动（如：“向左走”、“检查宝箱”）。\n"
+            f"2. DM会根据你的行动推进故事，每回合有 **{self.session_timeout}秒** 的行动时间，超时游戏将自动结束。\n"
             "3. 你可以随时发送 `/结束冒险` 或 `/强制结束冒险` 来退出游戏。\n\n"
             "现在，冒险即将开始... 祝你旅途愉快！"
         )
@@ -56,13 +60,8 @@ class TextAdventurePlugin(Star):
             "theme": game_theme,
             "llm_conversation_context": [],  # OpenAI格式的对话历史
         }
-
-        # 构建系统提示词
-        system_prompt = (
-            f"你是一位经验丰富的文字冒险游戏主持人(Game Master)。你将在一个'{game_theme}'主题下，根据玩家的行动实时生成独特且逻辑连贯的故事情节。"
-            "你的回复应包含：\n1. 对场景的生动描述。\n2. 玩家的当前状况。\n3. 引导玩家思考下一步行动，可以给出几个选项（例如：A. ... B. ...），或直接鼓励玩家自由探索。"
-            "保持回复简洁（约200字），避免重复，并维持故事的神秘感和趣味性。"
-        )
+        # 支持模板化 system_prompt
+        system_prompt = self.system_prompt_template.replace("{game_theme}", game_theme)
         game_state["llm_conversation_context"].append({"role": "system", "content": system_prompt})
         game_state["llm_conversation_context"].append({"role": "user", "content": f"故事开始了，我的第一个场景是什么？"})
 
@@ -93,7 +92,7 @@ class TextAdventurePlugin(Star):
             return
 
         # 定义会话等待器（只处理一轮输入）
-        @session_waiter(timeout=15, record_history_chains=False)
+        @session_waiter(timeout=self.session_timeout, record_history_chains=False)
         async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
             user_id = event.get_sender_id()
             if user_id not in self.active_game_sessions:
@@ -104,8 +103,7 @@ class TextAdventurePlugin(Star):
             player_action = event.message_str.strip()
             if not player_action:
                 await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
-                # 只在输入为空时延长等待，否则直接 return
-                controller.keep(timeout=15, reset_timeout=True)
+                controller.keep(timeout=self.session_timeout, reset_timeout=True)
                 return None, controller
             # 正常输入直接 return，主循环会重新 await，触发新计时器
             return player_action, controller
