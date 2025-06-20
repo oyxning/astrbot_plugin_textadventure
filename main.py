@@ -1,7 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api import AstrBotConfig # <-- 添加这一行导入语句
+from astrbot.api import AstrBotConfig
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import asyncio
 from typing import Dict # 导入 Dict 用于类型提示
@@ -183,7 +183,7 @@ class TextAdventurePlugin(Star):
             controller = self.active_game_sessions[user_id]
             controller.stop() # 立即尝试停止会话。这会触发 adventure_waiter 中的 finally 块进行清理。
             yield event.plain_result(
-                f"✅ 冒险结束指令已发出，游戏会话正在终止。如果游戏界面没有立即消失，请稍等片刻，它会在当前回合结束后终止。感谢您的参与！ "
+                f"✅ 冒险结束指令已发出，游戏会话正在终止。请注意，如果游戏正在等待AI响应，可能需要等待该响应完成后才能完全终止。感谢您的参与！ "
                 f"(当前游戏用户的ID是 {user_id})"
             )
         else:
@@ -213,7 +213,7 @@ class TextAdventurePlugin(Star):
             stopped_count += 1
         
         yield event.plain_result(
-            f"✅ 已向 {stopped_count} 个活跃的文字冒险游戏进程发出终止指令。请注意，如果游戏正在等待 LLM 响应，可能需要等待该响应完成后才能完全终止。在极端情况下，如果游戏长时间卡住，可能需要手动重载插件。 "
+            f"✅ 已向 {stopped_count} 个活跃的文字冒险游戏进程发出终止指令。请注意，如果游戏正在等待AI响应，可能需要等待该响应完成后才能完全终止。在极端情况下，如果游戏长时间卡住，可能需要手动重载插件。 "
             f"(管理员ID是 {event.get_sender_id()})"
         )
         logger.info(f"管理员 {event.get_sender_id()} 结束了所有 {stopped_count} 个游戏进程。")
