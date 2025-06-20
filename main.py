@@ -109,13 +109,17 @@ class TextAdventurePlugin(Star):
             return player_action, controller
 
         # 启动主回合循环
+        self.active_game_sessions[user_id] = "PENDING"
         try:
-            self.active_game_sessions[user_id] = "PENDING"
             while True:
                 try:
                     player_action, controller = await adventure_waiter(event)
                 except asyncio.TimeoutError:
                     yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
+                    break
+                except Exception as e:
+                    logger.error(f"冒险游戏发生未知错误(输入阶段): {e}")
+                    yield event.plain_result(f"冒险过程中发生未知错误，游戏已结束。\n(玩家ID: {user_id})")
                     break
                 if user_id not in self.active_game_sessions:
                     break
@@ -147,9 +151,6 @@ class TextAdventurePlugin(Star):
                         del self.active_game_sessions[user_id]
                     controller.stop()
                     break
-        except Exception as e:
-            logger.error(f"冒险游戏发生未知错误: {e}")
-            yield event.plain_result(f"冒险过程中发生未知错误，游戏已结束。\n(玩家ID: {user_id})")
         finally:
             if user_id in self.active_game_sessions:
                 del self.active_game_sessions[user_id]
