@@ -1,0 +1,8 @@
+{
+    "default_adventure_theme": {
+        "description": "默认的冒险主题，如果用户未指定则使用此主题。",
+        "type": "string",
+        "default": "奇幻世界",
+        "hint": "例如：奇幻世界, 赛博朋克城市, 末日废土"
+    }
+}
