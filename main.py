@@ -92,71 +92,65 @@ class TextAdventurePlugin(Star):
             yield event.plain_result(f"抱歉，无法开始冒险，LLM服务出现问题。(玩家ID: {user_id})")
             return
 
-        # 定义会话等待器
-        @session_waiter(timeout=15, record_history_chains=False) # NEW: 更新超时时间
+        # 定义会话等待器（只处理一轮输入）
+        @session_waiter(timeout=15, record_history_chains=False)
         async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
             user_id = event.get_sender_id()
-
-            # 在每次交互开始时，检查会话是否已被外部命令强制终止
             if user_id not in self.active_game_sessions:
                 logger.info(f"会话 for {user_id} 已被强制终止，停止处理新的行动。")
-                controller.stop() # 确保会话状态最终被清理
-                return
-            
-            # 使用实际的控制器实例更新会话
+                controller.stop()
+                return None, controller
             self.active_game_sessions[user_id] = controller
-
             player_action = event.message_str.strip()
             if not player_action:
                 await event.send(event.plain_result(f"你静静地站着，什么也没做。要继续冒险，请输入你的行动。\n(玩家ID: {user_id})"))
-                controller.keep(timeout=15, reset_timeout=True) # NEW: 更新超时时间
-                return
+                controller.keep(timeout=15, reset_timeout=True)
+                return None, controller
+            return player_action, controller
 
-            # 添加用户行动到上下文
-            game_state["llm_conversation_context"].append({"role": "user", "content": player_action})
-
-            try:
-                llm_response = await llm_provider.text_chat(
-                    prompt="",
-                    session_id=event.get_session_id(),
-                    contexts=game_state["llm_conversation_context"],
-                )
-                story_text = llm_response.completion_text
-                game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
-
-                # 再次检查会话是否在LLM响应期间被终止
-                if user_id not in self.active_game_sessions:
-                    logger.info(f"会话 for {user_id} 在LLM响应期间被强制终止，不再发送消息。")
-                    controller.stop()
-                    return
-
-                full_story_message = (
-                    f"{story_text}\n\n"
-                    f"**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"
-                )
-                await event.send(event.plain_result(full_story_message))
-                # 递归进入下一回合，重置计时器
-                await adventure_waiter(event)
-
-            except Exception as e:
-                logger.error(f"冒险过程中LLM调用失败: {e}")
-                await event.send(event.plain_result(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {user_id})"))
-                if user_id in self.active_game_sessions:
-                    del self.active_game_sessions[user_id]
-                controller.stop()
-        
-        # 启动会话
+        # 启动主回合循环
         try:
-            # FIX: 在启动等待器之前将会话标记为“待处理”
             self.active_game_sessions[user_id] = "PENDING"
-            await adventure_waiter(event)
-        except asyncio.TimeoutError:
-            yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
+            while True:
+                try:
+                    player_action, controller = await adventure_waiter(event)
+                except asyncio.TimeoutError:
+                    yield event.plain_result(f"⏱️ **冒险超时！**\n你的角色在原地陷入了沉睡，游戏已自动结束。使用 /开始冒险 来唤醒他/她，或开始新的冒险。\n(玩家ID: {user_id})")
+                    break
+                if user_id not in self.active_game_sessions:
+                    break
+                if not player_action:
+                    continue
+                # 添加用户行动到上下文
+                game_state["llm_conversation_context"].append({"role": "user", "content": player_action})
+                try:
+                    llm_response = await llm_provider.text_chat(
+                        prompt="",
+                        session_id=event.get_session_id(),
+                        contexts=game_state["llm_conversation_context"],
+                    )
+                    story_text = llm_response.completion_text
+                    game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
+                    if user_id not in self.active_game_sessions:
+                        logger.info(f"会话 for {user_id} 在LLM响应期间被强制终止，不再发送消息。")
+                        controller.stop()
+                        break
+                    full_story_message = (
+                        f"{story_text}\n\n"
+                        f"**[提示: 请直接输入你的行动]** (玩家ID: {user_id})"
+                    )
+                    await event.send(event.plain_result(full_story_message))
+                except Exception as e:
+                    logger.error(f"冒险过程中LLM调用失败: {e}")
+                    await event.send(event.plain_result(f"抱歉，AI的思绪似乎被卡住了，游戏暂时无法继续。请尝试 /强制结束冒险 并重新开始。\n(玩家ID: {user_id})"))
+                    if user_id in self.active_game_sessions:
+                        del self.active_game_sessions[user_id]
+                    controller.stop()
+                    break
         except Exception as e:
             logger.error(f"冒险游戏发生未知错误: {e}")
             yield event.plain_result(f"冒险过程中发生未知错误，游戏已结束。\n(玩家ID: {user_id})")
         finally:
-            # 无论会话如何结束，都确保从活跃会话中移除
             if user_id in self.active_game_sessions:
                 del self.active_game_sessions[user_id]
                 logger.info(f"用户 {user_id} 的游戏会话已清理并从 active_game_sessions 中移除。")
