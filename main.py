@@ -1,6 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from astrbot.api import AstrBotConfig # <-- 添加这一行导入语句
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import asyncio
 from typing import Dict # 导入 Dict 用于类型提示
