@@ -15,6 +15,16 @@ class TextAdventurePlugin(Star):
         self.default_adventure_theme = self.config.get("default_adventure_theme", "奇幻世界")
         logger.info(f"TextAdventurePlugin initialized with default theme: {self.default_adventure_theme}")
 
+    def _get_first_paragraph(self, text: str) -> str:
+        """
+        从给定文本中提取第一个段落。
+        通过双换行符（'\n\n'）来判断段落。
+        """
+        paragraphs = text.split('\n\n')
+        if paragraphs:
+            return paragraphs[0].strip()
+        return text.strip() # 如果没有双换行符，则返回整个文本
+
     @filter.command("开始冒险")
     async def start_adventure(self, event: AstrMessageEvent, theme: str = None):
         """
@@ -77,10 +87,14 @@ class TextAdventurePlugin(Star):
                 func_tool=None,
                 system_prompt="", # System prompt 已包含在 contexts 中
             )
-            initial_story_text = llm_response.completion_text
+            
+            # 提取LLM回复的第一段
+            initial_story_text = self._get_first_paragraph(llm_response.completion_text)
             game_state["llm_conversation_context"].append({"role": "assistant", "content": initial_story_text})
             
-            yield event.plain_result(f"\n{initial_story_text}") # 在免责声明后发送开场故事
+            # 添加提示，告知用户可以自由输入行动
+            full_initial_message = f"\n{initial_story_text}\n\n[提示: 请直接输入你的行动来继续故事 (例如 '向左走'，或 '检查背包')]"
+            yield event.plain_result(full_initial_message)
 
             @session_waiter(timeout=300, record_history_chains=False) # 设置每回合5分钟超时
             async def adventure_waiter(controller: SessionController, event: AstrMessageEvent):
@@ -105,11 +119,15 @@ class TextAdventurePlugin(Star):
                         func_tool=None,
                         system_prompt="",
                     )
-                    story_text = llm_response.completion_text
+                    
+                    # 提取LLM回复的第一段
+                    story_text = self._get_first_paragraph(llm_response.completion_text)
                     game_state["llm_conversation_context"].append({"role": "assistant", "content": story_text})
 
                     # 修复：使用 await event.send() 而非 yield event.plain_result()
-                    await event.send(event.plain_result(story_text))
+                    # 添加提示，告知用户可以自由输入行动
+                    full_story_message = f"{story_text}\n\n[提示: 请直接输入你的行动来继续故事 (例如 '向左走'，或 '检查背包')]"
+                    await event.send(event.plain_result(full_story_message))
                     controller.keep(timeout=300, reset_timeout=True) # 重置超时时间，等待下一回合玩家输入
 
                 except Exception as e:
