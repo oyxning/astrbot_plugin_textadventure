@@ -73,5 +73,5 @@
 ## 💡 另：插件反馈群
 
 由于作者持续的那么一个懒，平常不会及时的看issues，所以开了个QQ反馈群方便用户及时的拷打作者。
-* 群号：928985352       
-* 进群密码：神人desuwa
+点击链接加入群聊【Astrbot Plugin 猫娘乐园】：https://qm.qq.com/q/dBWQXCpwnm
+
