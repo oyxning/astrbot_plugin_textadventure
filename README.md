@@ -1,4 +1,4 @@
-# AstrBot 插件：动态文字冒险（textadventure）
+﻿# AstrBot 插件：动态文字冒险（textadventure）
 
 一个由 LLM（大语言模型）驱动的动态文字冒险小游戏插件，支持自定义冒险主题，AI 实时生成故事情节，带来沉浸式互动体验。
 
@@ -70,8 +70,7 @@
 - [项目仓库](https://github.com/oyxning/astrbot_plugin_textadventure)
 - [AstrBot 官方文档](https://astrbot.app)
 
-## 💡 另：插件反馈群
+## 💡 联系作者
 
-由于作者持续的那么一个懒，平常不会及时的看issues，所以开了个QQ反馈群方便用户及时的拷打作者。
-点击链接加入群聊【Astrbot Plugin 猫娘乐园】：https://qm.qq.com/q/dBWQXCpwnm
+如有紧急问题，请联系邮箱：shy0074@tongujiyu.cn
 
